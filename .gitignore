@@ -1,0 +1,29 @@
+# Entornos virtuales
+.venv/
+venv/
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archivos de logs
+*.log
+
+# Archivos de base de datos locales
+*.sqlite3
+
+# Carpetas de caché de herramientas
+.pytest_cache/
+.mypy_cache/
+coverage/
+htmlcov/
+
+# Configuración de IDEs
+.vscode/
+.idea/
+*.iml
+
+# Archivos de sistema
+.DS_Store
+Thumbs.db
