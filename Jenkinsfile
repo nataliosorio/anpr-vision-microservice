@@ -1,42 +1,55 @@
 pipeline {
     agent any
 
+    environment {
+        DOCKER_CLI_HINTS = "off" // evita warnings en algunos entornos
+    }
+
     stages {
         stage('Leer entorno desde .env raíz') {
             steps {
+                sh '''
+                    echo "📂 Leyendo entorno desde .env"
+
+                    # Extraer la variable ENVIRONMENT del archivo .env
+                    ENVIRONMENT=$(grep '^ENVIRONMENT=' .env | cut -d '=' -f2 | tr -d '\\r\\n')
+
+                    if [ -z "$ENVIRONMENT" ]; then
+                        echo "❌ No se encontró ENVIRONMENT en .env"
+                        exit 1
+                    fi
+
+                    echo "✅ Entorno detectado: $ENVIRONMENT"
+                    echo "ENVIRONMENT=$ENVIRONMENT" >> env.properties
+                    echo "ENV_DIR=DevOps/$ENVIRONMENT" >> env.properties
+                    echo "COMPOSE_FILE=DevOps/$ENVIRONMENT/docker-compose.yml" >> env.properties
+                    echo "ENV_FILE=DevOps/$ENVIRONMENT/.env" >> env.properties
+                '''
                 script {
-                    def envValue = powershell(
-                        script: "(Get-Content .env | Where-Object { \$_ -match '^ENVIRONMENT=' }) -replace '^ENVIRONMENT=', ''",
-                        returnStdout: true
-                    ).trim()
-
-                    if (!envValue) {
-                        error "❌ No se encontró ENVIRONMENT en .env"
-                    }
-
-                    env.ENVIRONMENT = envValue
-                    env.ENV_DIR = "DevOps/${env.ENVIRONMENT}"
-                    env.COMPOSE_FILE = "${env.ENV_DIR}/docker-compose.yml"
-                    env.ENV_FILE = "${env.ENV_DIR}/.env"
-
-                    echo "✅ Entorno detectado: ${env.ENVIRONMENT}"
-                    echo "📁 Compose: ${env.COMPOSE_FILE}"
-                    echo "📄 .env: ${env.ENV_FILE}"
+                    def props = readProperties file: 'env.properties'
+                    env.ENVIRONMENT = props['ENVIRONMENT']
+                    env.ENV_DIR = props['ENV_DIR']
+                    env.COMPOSE_FILE = props['COMPOSE_FILE']
+                    env.ENV_FILE = props['ENV_FILE']
                 }
             }
         }
 
         stage('Construir imagen Docker') {
             steps {
-                echo "🐳 Construyendo imagen para ${env.ENVIRONMENT}"
-                bat "docker build -t anpr-microservice-${env.ENVIRONMENT}:latest -f Dockerfile ."
+                sh '''
+                    echo "🐳 Construyendo imagen para $ENVIRONMENT"
+                    docker build -t anpr-microservice-$ENVIRONMENT:latest -f Dockerfile .
+                '''
             }
         }
 
         stage('Desplegar microservicio') {
             steps {
-                echo "🚀 Desplegando ANPR Microservice (${env.ENVIRONMENT})"
-                bat "docker compose -f ${env.COMPOSE_FILE} --env-file ${env.ENV_FILE} up -d --build --remove-orphans"
+                sh '''
+                    echo "🚀 Desplegando ANPR Microservice ($ENVIRONMENT)"
+                    docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build --remove-orphans
+                '''
             }
         }
     }
@@ -50,3 +63,4 @@ pipeline {
         }
     }
 }
+
