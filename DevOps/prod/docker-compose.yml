@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  # 🧠 Worker principal
+  # 🧠 Worker principal (ANPR Vision Microservice)
   anpr-worker-prod:
     build:
       context: ../..
@@ -10,9 +10,7 @@ services:
     env_file:
       - .env
     working_dir: /app
-    volumes:
-      - ../../:/app
-      - ../../models:/app/models
+    # ✅ No montamos código ni modelos en producción (usa los de la imagen)
     command: python -m src.workers.main_worker
     depends_on:
       - kafka-prod
@@ -21,7 +19,7 @@ services:
     tty: true
     restart: unless-stopped
 
-  # ⚙️ Kafka Broker (modo Kraft)
+  # ⚙️ Kafka Broker (modo Kraft - sin Zookeeper)
   kafka-prod:
     image: bitnamilegacy/kafka:4.0.0
     container_name: kafka-prod
@@ -71,7 +69,7 @@ services:
       - anpr-net-prod
     restart: "no"
 
-  # 🧭 Kafka UI
+  # 🧭 Kafka UI (interfaz web)
   kafka-ui-prod:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui-prod
@@ -84,10 +82,17 @@ services:
       - kafka-prod
     networks:
       - anpr-net-prod
+    restart: unless-stopped
 
+# ===============================
+# Volúmenes persistentes
+# ===============================
 volumes:
   kafka_data_prod:
 
+# ===============================
+# Red interna del entorno
+# ===============================
 networks:
   anpr-net-prod:
     driver: bridge
