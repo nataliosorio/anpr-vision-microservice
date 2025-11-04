@@ -1,17 +1,16 @@
 version: "3.9"
 
 services:
+  # 🧠 Worker principal (ANPR Vision Microservice)
   anpr-worker-develop:
     build:
-      context: ../.. 
+      context: ../..
       dockerfile: Dockerfile
     container_name: anpr-worker-develop
     env_file:
       - .env
     working_dir: /app
-    volumes:
-      - ../../:/app
-      - ../../models:/app/models
+    # ✅ En desarrollo puedes montar el código local si lo deseas, pero por defecto usa la imagen
     command: python -m src.workers.main_worker
     depends_on:
       - kafka-develop
@@ -20,6 +19,7 @@ services:
     tty: true
     restart: unless-stopped
 
+  # ⚙️ Kafka Broker (modo Kraft - sin Zookeeper)
   kafka-develop:
     image: bitnamilegacy/kafka:4.0.0
     container_name: kafka-develop
@@ -40,7 +40,13 @@ services:
     networks:
       - anpr-net-develop
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost ${KAFKA_PORT_INTERNAL} || nc -z localhost ${KAFKA_PORT_EXTERNAL}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
+  # 🧩 Inicializador de tópicos Kafka
   kafka-init-develop:
     image: bitnamilegacy/kafka:4.0.0
     container_name: kafka-init-develop
@@ -50,23 +56,25 @@ services:
       - .env
     entrypoint: >
       bash -c "
-        echo 'Esperando Kafka...';
+        echo 'Esperando Kafka DEVELOP...';
         for i in $(seq 1 60); do
           /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server ${KAFKA_BROKER} --list >/dev/null 2>&1 && { echo 'Kafka listo'; break; }
-          echo 'esperando...'; sleep 1;
+          sleep 1;
         done;
         echo 'Creando tópico ${KAFKA_TOPIC}...';
         /opt/bitnami/kafka/bin/kafka-topics.sh --create --bootstrap-server ${KAFKA_BROKER} --replication-factor 1 --partitions 3 --topic ${KAFKA_TOPIC} --if-not-exists;
-        echo ' kafka-init-develop completado';
+        echo '✅ kafka-init-develop completado';
       "
     networks:
       - anpr-net-develop
+    restart: "no"
 
+  # 🧭 Kafka UI (interfaz web)
   kafka-ui-develop:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui-develop
     ports:
-      - "8080:8080"
+      - "8180:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: develop
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-develop:${KAFKA_PORT_INTERNAL}
@@ -74,10 +82,17 @@ services:
       - kafka-develop
     networks:
       - anpr-net-develop
+    restart: unless-stopped
 
+# ===============================
+# Volúmenes persistentes
+# ===============================
 volumes:
   kafka_data_develop:
 
+# ===============================
+# Red interna del entorno
+# ===============================
 networks:
   anpr-net-develop:
     driver: bridge

@@ -1,17 +1,15 @@
 version: "3.9"
 
 services:
+  # 🧠 Worker principal (ANPR Vision Microservice)
   anpr-worker-qa:
     build:
-      context: ../.. 
+      context: ../..
       dockerfile: Dockerfile
     container_name: anpr-worker-qa
     env_file:
       - .env
     working_dir: /app
-    volumes:
-      - ../../:/app
-      - ../../models:/app/models
     command: python -m src.workers.main_worker
     depends_on:
       - kafka-qa
@@ -20,6 +18,7 @@ services:
     tty: true
     restart: unless-stopped
 
+  # ⚙️ Kafka Broker (modo Kraft - sin Zookeeper)
   kafka-qa:
     image: bitnamilegacy/kafka:4.0.0
     container_name: kafka-qa
@@ -40,7 +39,13 @@ services:
     networks:
       - anpr-net-qa
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "bash", "-c", "nc -z localhost ${KAFKA_PORT_INTERNAL} || nc -z localhost ${KAFKA_PORT_EXTERNAL}"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
+  # 🧩 Inicializador de tópicos Kafka
   kafka-init-qa:
     image: bitnamilegacy/kafka:4.0.0
     container_name: kafka-init-qa
@@ -57,15 +62,18 @@ services:
         done;
         echo 'Creando tópico ${KAFKA_TOPIC}...';
         /opt/bitnami/kafka/bin/kafka-topics.sh --create --bootstrap-server ${KAFKA_BROKER} --replication-factor 1 --partitions 3 --topic ${KAFKA_TOPIC} --if-not-exists;
+        echo '✅ kafka-init-qa completado';
       "
     networks:
       - anpr-net-qa
+    restart: "no"
 
+  # 🧭 Kafka UI (interfaz web)
   kafka-ui-qa:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui-qa
     ports:
-      - "8180:8080"
+      - "8280:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: qa
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-qa:${KAFKA_PORT_INTERNAL}
@@ -73,10 +81,17 @@ services:
       - kafka-qa
     networks:
       - anpr-net-qa
+    restart: unless-stopped
 
+# ===============================
+# Volúmenes persistentes
+# ===============================
 volumes:
   kafka_data_qa:
 
+# ===============================
+# Red interna del entorno
+# ===============================
 networks:
   anpr-net-qa:
     driver: bridge

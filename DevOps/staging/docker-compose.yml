@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  # 🧠 Worker principal
+  # 🧠 Worker principal (ANPR Vision Microservice)
   anpr-worker-staging:
     build:
       context: ../..
@@ -10,9 +10,6 @@ services:
     env_file:
       - .env
     working_dir: /app
-    volumes:
-      - ../../:/app
-      - ../../models:/app/models
     command: python -m src.workers.main_worker
     depends_on:
       - kafka-staging
@@ -21,7 +18,7 @@ services:
     tty: true
     restart: unless-stopped
 
-  # ⚙️ Kafka Broker (modo Kraft)
+  # ⚙️ Kafka Broker (modo Kraft - sin Zookeeper)
   kafka-staging:
     image: bitnamilegacy/kafka:4.0.0
     container_name: kafka-staging
@@ -71,12 +68,12 @@ services:
       - anpr-net-staging
     restart: "no"
 
-  # 🧭 Kafka UI
+  # 🧭 Kafka UI (interfaz web)
   kafka-ui-staging:
     image: provectuslabs/kafka-ui:latest
     container_name: kafka-ui-staging
     ports:
-      - "8280:8080"
+      - "8480:8080"
     environment:
       KAFKA_CLUSTERS_0_NAME: staging
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-staging:${KAFKA_PORT_INTERNAL}
@@ -84,10 +81,17 @@ services:
       - kafka-staging
     networks:
       - anpr-net-staging
+    restart: unless-stopped
 
+# ===============================
+# Volúmenes persistentes
+# ===============================
 volumes:
   kafka_data_staging:
 
+# ===============================
+# Red interna del entorno
+# ===============================
 networks:
   anpr-net-staging:
     driver: bridge
