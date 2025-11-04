@@ -2,8 +2,8 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_CLI_HINTS = "off"          // evita warnings molestos
-        BASE_IMAGE = "anibal2504/anpr-python-deps:3.12-v0"  // imagen base precompilada
+        DOCKER_CLI_HINTS = "off" // evita warnings molestos
+        BASE_IMAGE = "anibal2504/anpr-python-deps:3.12-v0" // imagen base precompilada
     }
 
     stages {
@@ -16,24 +16,24 @@ pipeline {
                 sh '''
                     echo "📂 Leyendo entorno desde .env"
 
-                    # Extraer la variable ENVIRONMENT del archivo .env
-                    ENVIRONMENT=$(grep '^ENVIRONMENT=' .env | cut -d '=' -f2 | tr -d '\\r\\n')
+                    # Extraer la variable DEPLOY_ENV del archivo .env raíz
+                    DEPLOY_ENV=$(grep '^DEPLOY_ENV=' .env | cut -d '=' -f2 | tr -d '\\r\\n')
 
-                    if [ -z "$ENVIRONMENT" ]; then
-                        echo "❌ No se encontró ENVIRONMENT en .env"
+                    if [ -z "$DEPLOY_ENV" ]; then
+                        echo "❌ No se encontró DEPLOY_ENV en .env"
                         exit 1
                     fi
 
-                    echo "✅ Entorno detectado: $ENVIRONMENT"
-                    echo "ENVIRONMENT=$ENVIRONMENT" >> env.properties
-                    echo "ENV_DIR=DevOps/$ENVIRONMENT" >> env.properties
-                    echo "COMPOSE_FILE=DevOps/$ENVIRONMENT/docker-compose.yml" >> env.properties
-                    echo "ENV_FILE=DevOps/$ENVIRONMENT/.env" >> env.properties
+                    echo "✅ Entorno detectado: $DEPLOY_ENV"
+                    echo "DEPLOY_ENV=$DEPLOY_ENV" >> env.properties
+                    echo "ENV_DIR=DevOps/$DEPLOY_ENV" >> env.properties
+                    echo "COMPOSE_FILE=DevOps/$DEPLOY_ENV/docker-compose.yml" >> env.properties
+                    echo "ENV_FILE=DevOps/$DEPLOY_ENV/.env" >> env.properties
                 '''
 
                 script {
                     def props = readProperties file: 'env.properties'
-                    env.ENVIRONMENT = props['ENVIRONMENT']
+                    env.DEPLOY_ENV = props['DEPLOY_ENV']
                     env.ENV_DIR = props['ENV_DIR']
                     env.COMPOSE_FILE = props['COMPOSE_FILE']
                     env.ENV_FILE = props['ENV_FILE']
@@ -64,8 +64,8 @@ pipeline {
         stage('Construir imagen Docker') {
             steps {
                 sh '''
-                    echo "🐳 Construyendo imagen del microservicio para $ENVIRONMENT"
-                    docker build -t anpr-microservice-$ENVIRONMENT:latest -f Dockerfile .
+                    echo "🐳 Construyendo imagen del microservicio para $DEPLOY_ENV"
+                    docker build -t anpr-microservice-$DEPLOY_ENV:latest -f Dockerfile .
                 '''
             }
         }
@@ -76,7 +76,7 @@ pipeline {
         stage('Desplegar microservicio') {
             steps {
                 sh '''
-                    echo "🚀 Desplegando ANPR Microservice ($ENVIRONMENT)"
+                    echo "🚀 Desplegando ANPR Microservice ($DEPLOY_ENV)"
                     docker compose -f $COMPOSE_FILE --env-file $ENV_FILE up -d --build --remove-orphans
                 '''
             }
@@ -88,10 +88,10 @@ pipeline {
     // =========================================================
     post {
         success {
-            echo "🎉 Despliegue completado correctamente para ${env.ENVIRONMENT}"
+            echo "🎉 Despliegue completado correctamente para ${env.DEPLOY_ENV}"
         }
         failure {
-            echo "💥 Error durante el despliegue del microservicio (${env.ENVIRONMENT})"
+            echo "💥 Error durante el despliegue del microservicio (${env.DEPLOY_ENV})"
         }
     }
 }
