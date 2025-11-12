@@ -38,7 +38,7 @@ class KafkaPublisher(IEventPublisher):
         self.topic = settings.kafka_topic
         self.delivery_timeout = delivery_timeout
 
-        # métricas internas básicas
+        # Métricas básicas
         self.metrics = {
             "publish_ok": 0,
             "publish_failed": 0,
@@ -70,6 +70,7 @@ class KafkaPublisher(IEventPublisher):
 
         payload = None
         start_time = time.time()
+
         try:
             # ------------------------------
             # Adaptar DetectionResult → evento JSON
@@ -80,7 +81,7 @@ class KafkaPublisher(IEventPublisher):
             event = {
                 "plate": plate_text,
                 "cameraId": result.camera_id or result.source,
-                "parkingId": None,
+                "parkingId": getattr(result, "parking_id", None),  # ✅ ahora se usa el real
                 "timestamp": timestamp_iso,
                 "frameId": result.frame_id,
                 "imageUrl": None
@@ -102,8 +103,10 @@ class KafkaPublisher(IEventPublisher):
                     logger.error("❌ Kafka delivery callback error: %s", err)
                 else:
                     latency = (time.time() - start_time) * 1000
-                    logger.info("✅ Kafka delivered topic=%s partition=%s offset=%s latency=%.1fms",
-                                msg.topic(), msg.partition(), msg.offset(), latency)
+                    logger.info(
+                        "✅ Kafka delivered topic=%s partition=%s offset=%s latency=%.1fms payload=%s",
+                        msg.topic(), msg.partition(), msg.offset(), latency, payload
+                    )
 
             # ------------------------------
             # Envío del mensaje
@@ -145,8 +148,7 @@ class KafkaPublisher(IEventPublisher):
             # Éxito
             # ------------------------------
             self.metrics["publish_ok"] += 1
-            logger.debug("Evento publicado correctamente en Kafka topic=%s frame=%s payload=%s",
-                         self.topic, key, payload)
+            logger.debug("Evento publicado correctamente en Kafka topic=%s frame=%s", self.topic, key)
 
         except Exception as ex:
             logger.exception("Error al publicar en Kafka. payload=%s", payload)

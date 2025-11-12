@@ -1,4 +1,3 @@
-# src/infrastructure/Camera/opencv_camera_stream.py
 import cv2
 import time
 import logging
@@ -21,7 +20,11 @@ class OpenCVCameraStream(ICameraStream):
         :param fps_limit: Máx FPS (0 = ilimitado).
         """
         self.url = url
-        self.camera_id = None  # puede ser setiado por la factory (create_camera_stream)
+        self.camera_id = None            # se setea desde la factory
+        self.parking_id = None           # 👈 ahora declarado explícitamente
+        self.name = None                 # 👈 opcional: para logs y trazabilidad
+        self.location = None             # 👈 opcional: para logs y debugging
+
         self.cap = None
         self.reconnect_attempts = reconnect_attempts
         self.fps_limit = fps_limit
@@ -34,6 +37,7 @@ class OpenCVCameraStream(ICameraStream):
         self._thread = None
 
     def connect(self) -> None:
+        """Inicia la conexión al stream de video."""
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
 
         # Si es RTSP, reducir el buffer a 1
@@ -41,13 +45,13 @@ class OpenCVCameraStream(ICameraStream):
             try:
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             except Exception:
-                # no todos los builds de OpenCV soportan set(CAP_PROP_BUFFERSIZE)
-                pass
+                pass  # algunos builds no soportan esta propiedad
 
         if not self.cap or not self.cap.isOpened():
             raise ConnectionError(f"No se pudo abrir el stream: {self.url}")
 
-        logger.info(f"Conectado al stream: {self.url}")
+        logger.info(f"🎥 Conectado al stream {self.name or self.camera_id or self.url} "
+                    f"(parking_id={self.parking_id})")
 
         # Lanzar thread de lectura
         self._running = True
@@ -55,7 +59,7 @@ class OpenCVCameraStream(ICameraStream):
         self._thread.start()
 
     def _update_frames(self):
-        """ Hilo que lee continuamente frames y mantiene solo el más reciente """
+        """Hilo que lee continuamente frames y mantiene solo el más reciente."""
         while self._running:
             if self.cap is None or not self.cap.isOpened():
                 if not self._try_reconnect():
@@ -64,7 +68,7 @@ class OpenCVCameraStream(ICameraStream):
 
             ret, frame = self.cap.read()
             if not ret:
-                logger.warning("Error al leer frame, intentando reconectar...")
+                logger.warning(f"[{self.camera_id}] Error al leer frame, intentando reconectar...")
                 if not self._try_reconnect():
                     time.sleep(1)
                 continue
@@ -75,7 +79,7 @@ class OpenCVCameraStream(ICameraStream):
                 self._latest_frame = Frame(data=frame, timestamp=time.time(), source=source)
 
     def read_frame(self):
-        """ Devuelve el último frame disponible respetando el fps_limit """
+        """Devuelve el último frame disponible respetando el fps_limit."""
         if self.fps_limit > 0:
             elapsed = time.time() - self._last_frame_time
             min_interval = 1.0 / self.fps_limit
@@ -92,12 +96,11 @@ class OpenCVCameraStream(ICameraStream):
         return frame
 
     def _try_reconnect(self) -> bool:
-        """ Intenta reconectar al stream """
+        """Intenta reconectar al stream."""
         for attempt in range(1, self.reconnect_attempts + 1):
-            logger.info(f"Reintentando conexión ({attempt}/{self.reconnect_attempts})...")
+            logger.info(f"[{self.camera_id}] Reintentando conexión ({attempt}/{self.reconnect_attempts})...")
             cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
 
-            # Si es RTSP, aplicar de nuevo buffersize=1
             if isinstance(self.url, str) and self.url.startswith("rtsp://") and cap is not None:
                 try:
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
@@ -106,13 +109,14 @@ class OpenCVCameraStream(ICameraStream):
 
             if cap and cap.isOpened():
                 self.cap = cap
-                logger.info("Reconexión exitosa.")
+                logger.info(f"[{self.camera_id}] Reconexión exitosa.")
                 return True
             time.sleep(1)
-        logger.error("No se pudo reconectar al stream.")
+        logger.error(f"[{self.camera_id}] No se pudo reconectar al stream.")
         return False
 
     def disconnect(self) -> None:
+        """Detiene el hilo y libera la cámara."""
         self._running = False
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=2.0)
@@ -122,7 +126,7 @@ class OpenCVCameraStream(ICameraStream):
             except Exception:
                 pass
             self.cap = None
-        logger.info("🔌 Stream cerrado.")
+        logger.info(f"🔌 Stream cerrado ({self.camera_id}).")
 
     def __enter__(self):
         self.connect()

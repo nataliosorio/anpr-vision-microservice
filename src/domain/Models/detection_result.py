@@ -15,6 +15,7 @@ class DetectionResult:
     source: str               # identificador de la cámara o URL (legacy)
     captured_at: float        # timestamp original del frame
     camera_id: Optional[str] = None
+    parking_id: Optional[int] = None   # 👈 agregado
 
     def to_dict(self) -> dict:
         """Convierte a dict serializable."""
@@ -25,5 +26,6 @@ class DetectionResult:
             "processed_at": self.processed_at,
             "source": self.source,
             "captured_at": self.captured_at,
-            "camera_id": self.camera_id
+            "camera_id": self.camera_id,
+            "parking_id": self.parking_id
         }

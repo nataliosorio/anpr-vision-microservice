@@ -13,9 +13,15 @@ class Settings(BaseSettings):
     kafka_broker: str = Field("kafka:9092", env="KAFKA_BROKER")
     kafka_topic: str = Field("anpr-detections", env="KAFKA_TOPIC")
 
+    # 👇 nuevas variables para consumidores
+    kafka_camera_sync_topic: str = Field("anpr-cameras-sync", env="KAFKA_CAMERA_SYNC_TOPIC")
+    kafka_camera_sync_group: str = Field("anpr-camera-sync-group", env="KAFKA_CAMERA_SYNC_GROUP")
+    kafka_auto_offset_reset: str = Field("earliest", env="KAFKA_AUTO_OFFSET_RESET")
+    kafka_enable_auto_commit: bool = Field(True, env="KAFKA_ENABLE_AUTO_COMMIT")
+
     # Database & cache
-    db_url: str = Field(..., env="DB_URL")
-    redis_url: str = Field(..., env="REDIS_URL")
+    db_url: str = Field("sqlite:///./anpr_micro.db", env="DB_URL")   # 👈 default seguro
+    redis_url: str = Field("redis://localhost:6379/0", env="REDIS_URL")
 
     # Model / YOLO
     model_path: str = Field("./models/best.pt", env="MODEL_PATH")
