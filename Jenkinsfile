@@ -70,6 +70,18 @@ pipeline {
             }
         }
 
+                // =====================================================
+        // 5️⃣ Preparar red y base de datos
+        // =====================================================
+        stage('Preparar red y base de datos') {
+            steps {
+                script {
+                    echo "🌐 Verificando red anpr-net-${env.ENVIRONMENT} ..."
+                    sh "docker network create anpr-net-${env.ENVIRONMENT} || echo '✅ Red ya existe'"
+                }
+            }
+        }
+
         // =====================================================
         // 4️⃣ Desplegar microservicio (Docker Compose)
         // =====================================================
