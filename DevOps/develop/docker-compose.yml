@@ -95,5 +95,5 @@ volumes:
 # ===============================
 networks:
   anpr-net-develop:
-    driver: bridge
+    external: true
 
