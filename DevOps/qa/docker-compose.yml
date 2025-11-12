@@ -1,4 +1,4 @@
-container_name: anprvision-micro-qa
+name: anprvision-micro-qa
 version: "3.9"
 
 services:
