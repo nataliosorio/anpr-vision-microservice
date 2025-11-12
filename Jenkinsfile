@@ -76,8 +76,8 @@ pipeline {
         stage('Preparar red y base de datos') {
             steps {
                 script {
-                    echo "🌐 Verificando red anpr-net-${env.ENVIRONMENT} ..."
-                    sh "docker network create anpr-net-${env.ENVIRONMENT} || echo '✅ Red ya existe'"
+                    echo "🌐 Verificando red anpr-net-${DEPLOY_ENV} ..."
+                    sh "docker network create anpr-net-${DEPLOY_ENV} || echo '✅ Red ya existe'"
                 }
             }
         }
