@@ -1,39 +1,57 @@
-# src/core/config.py
+import os
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from dotenv import load_dotenv
+
+# 1️⃣ Cargar primero el .env raíz
+load_dotenv(".env")
+
+# 2️⃣ Leer DEPLOY_ENV desde el .env raíz
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "develop").lower()
+
+# 3️⃣ Construir ruta del .env específico
+ENV_PATH = f"DevOps/{DEPLOY_ENV}/.env"
+
+# 4️⃣ Cargar también ese .env
+load_dotenv(ENV_PATH, override=True)
+
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=ENV_PATH,       # carga explícita del .env final
+        extra="allow"
+    )
+
     # App
     deploy_env: str = Field("develop", env="DEPLOY_ENV")
     app_name: str = Field("anpr-microservice", env="APP_NAME")
     app_env: str = Field("develop", env="APP_ENV")
     app_port: int = Field(8000, env="APP_PORT")
 
-    # Kafka (defaults pensados para correr en docker-compose)
+    # Kafka
     kafka_broker: str = Field("kafka:9092", env="KAFKA_BROKER")
     kafka_topic: str = Field("anpr-detections", env="KAFKA_TOPIC")
 
-    # 👇 nuevas variables para consumidores
     kafka_camera_sync_topic: str = Field("anpr-cameras-sync", env="KAFKA_CAMERA_SYNC_TOPIC")
     kafka_camera_sync_group: str = Field("anpr-camera-sync-group", env="KAFKA_CAMERA_SYNC_GROUP")
     kafka_auto_offset_reset: str = Field("earliest", env="KAFKA_AUTO_OFFSET_RESET")
     kafka_enable_auto_commit: bool = Field(True, env="KAFKA_ENABLE_AUTO_COMMIT")
 
-    # Database & cache
-    db_url: str = Field("sqlite:///./anpr_micro.db", env="DB_URL")   # 👈 default seguro
+    # Database
+    db_url: str = Field("sqlite:///./anpr_micro.db", env="DB_URL")
     redis_url: str = Field("redis://localhost:6379/0", env="REDIS_URL")
 
-    # Model / YOLO
+    # Model
     model_path: str = Field("./models/best.pt", env="MODEL_PATH")
     conf_threshold: float = Field(0.3, env="CONF_THRESHOLD")
     iou_threshold: float = Field(0.45, env="IOU_THRESHOLD")
 
-    # Runtime flags
+    # Runtime
     debug_show: bool = Field(False, env="DEBUG_SHOW")
     loop_delay: float = Field(0.0, env="LOOP_DELAY")
 
-    # Dedup / plate rules
-    dedup_ttl: float = Field(9.0, env="DEDUP_TTL")           # segundos, default 9.0
+    # Dedup
+    dedup_ttl: float = Field(9.0, env="DEDUP_TTL")
     similarity_threshold: float = Field(0.9, env="SIMILARITY_THRESHOLD")
     plate_min_length: int = Field(5, env="PLATE_MIN_LENGTH")
 
@@ -44,10 +62,10 @@ class Settings(BaseSettings):
     ocr_min_confidence: float = Field(0.8, env="OCR_MIN_CONFIDENCE")
 
     # Camera
-    camera_url: str = Field(..., env="CAMERA_URL")
+    camera_url: str = Field(None, env="CAMERA_URL")
     camera_native: bool = Field(False, env="CAMERA_NATIVE")
 
-    # Switch de detector
+    # YOLO switch
     yolo_version: str = Field("v8", env="YOLO_VERSION")
 
     # YOLOv5 specifics
@@ -60,7 +78,7 @@ class Settings(BaseSettings):
     yolov5_max_det: int = Field(1000, env="YOLOV5_MAX_DET")
     yolov5_device: str = Field("auto", env="YOLOV5_DEVICE")
 
-    # Hugging Face fallback
+    # HF fallback
     yolov5_hf_repo: str = Field("keremberke/yolov5n-license-plate", env="YOLOV5_HF_REPO")
     yolov5_hf_filename: str = Field("yolov5n-license-plate.pt", env="YOLOV5_HF_FILENAME")
 
@@ -70,9 +88,5 @@ class Settings(BaseSettings):
     bytetrack_buffer_size: int = Field(30, env="BYTETRACK_BUFFER_SIZE")
     bytetrack_fps: int = Field(30, env="BYTETRACK_FPS")
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
-# instancia global
 settings = Settings()
