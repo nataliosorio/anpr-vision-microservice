@@ -6,24 +6,40 @@ from src.domain.Models.camera import Camera
 
 def create_camera_stream(camera: Optional[Camera] = None) -> ICameraStream:
     """
-    Factory que devuelve un ICameraStream.
-    Si se pasa un modelo Camera, se asegura de que el stream tenga
-    los metadatos necesarios (camera_id, parking_id, name, location).
+    Factory responsable de crear el stream correcto (OpenCV, Picamera2 o FakeCameraStream).
+    También adjunta la metadata de la cámara al stream resultante.
     """
-    if settings.camera_native:
-        # Si usas Picamera2 en algún host, ajusta aquí
+
+    # ==========================================================
+    # 🧪 1) Fake camera para pruebas y stress tests
+    # ==========================================================
+    if camera is not None and isinstance(camera.url, str) and camera.url.startswith("fake://"):
+        from src.infrastructure.Camera.fake_camera_stream import FakeCameraStream
+
+        video_path = camera.url.replace("fake://", "")  # fake://video.mp4
+        stream = FakeCameraStream(
+            video_path=video_path,
+            camera_id=camera.camera_id,
+            parking_id=camera.parking_id
+        )
+
+    # ==========================================================
+    # 🎥 2) Picamera2 modo nativo (solo hardware compatible)
+    # ==========================================================
+    elif settings.camera_native:
         from src.infrastructure.Camera.picamera2_camera_stream import Picamera2CameraStream
-        try:
-            stream = Picamera2CameraStream(camera) if camera is not None else Picamera2CameraStream()
-        except TypeError:
-            stream = Picamera2CameraStream()
+        stream = Picamera2CameraStream(camera)
+
+    # ==========================================================
+    # 📷 3) OpenCV (modo normal RTSP/HTTP/file)
+    # ==========================================================
     else:
         from src.infrastructure.Camera.opencv_camera_stream import OpenCVCameraStream
         url = camera.url if camera is not None else settings.camera_url
         stream = OpenCVCameraStream(url)
 
     # ==========================================================
-    # 📦 Anexar metadatos de la cámara (dominio → stream)
+    # 🧩 4) Metadata desde modelo Camera → stream
     # ==========================================================
     if camera is not None:
         stream.camera_id = getattr(camera, "camera_id", None)
@@ -32,8 +48,8 @@ def create_camera_stream(camera: Optional[Camera] = None) -> ICameraStream:
         stream.name = getattr(camera, "name", None)
         stream.location = getattr(camera, "location", None)
     else:
-        # fallback: modo "standalone" (por si el micro no tiene BD)
-        stream.camera_id = getattr(stream, "camera_id", "default")
+        # fallback cuando no hay DB pero se quiere arrancar
+        stream.camera_id = "default"
         stream.url = getattr(stream, "url", settings.camera_url)
         stream.parking_id = None
         stream.name = "ENTRADA"

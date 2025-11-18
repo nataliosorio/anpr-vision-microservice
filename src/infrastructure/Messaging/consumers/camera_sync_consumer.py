@@ -21,7 +21,7 @@ class CameraSyncConsumer:
         enable_auto_commit: bool = None,
         bootstrap_servers: str = None
     ):
-        self.topic = topic or settings.kafka_camera_sync_topic
+        self.topic = topic or settings.kafka_topic_cameras
         self.group_id = group_id or settings.kafka_camera_sync_group
 
         self.config = {
@@ -50,12 +50,14 @@ class CameraSyncConsumer:
                 msg = self.consumer.poll(timeout=1.0)
                 if msg is None:
                     continue
+
                 if msg.error():
                     if msg.error().code() == KafkaError._PARTITION_EOF:
                         continue
                     raise KafkaException(msg.error())
 
                 self._handle_message(msg.value())
+
             except Exception as e:
                 logger.exception(f"❌ Error procesando mensaje Kafka: {e}")
 
@@ -70,27 +72,46 @@ class CameraSyncConsumer:
         """Procesa el mensaje entrante y sincroniza la DB local."""
         try:
             payload = json.loads(raw_data.decode("utf-8"))
-            event_type = payload.get("type")
-            camera_id = payload.get("cameraId")
+
+            # El backend ahora envía:
+            # {
+            #   "action": "...",
+            #   "camera": { ... }
+            # }
+            event_type = payload.get("action")
+            camera_data = payload.get("camera", {})
+
+            # El id de la cámara ahora viene dentro de camera.id
+            camera_id = camera_data.get("id")
 
             if not camera_id:
-                logger.warning("Mensaje inválido: sin 'cameraId'")
+                logger.warning("Mensaje inválido: sin 'camera.id'")
                 return
 
-            if event_type in ("CameraCreated", "CameraUpdated"):
+            # Conversión backend → micro
+            asset = camera_data.get("asset", True)
+            is_deleted = camera_data.get("isDeleted", False)
+
+            # El micro usa is_active, no asset/isDeleted
+            is_active = asset and not is_deleted
+
+            # CREATE o UPDATE
+            if event_type in ("CREATE", "UPDATE"):
                 cam = Camera(
-                    camera_id=camera_id,
-                    name=payload.get("name"),
-                    url=payload.get("url"),
-                    location=payload.get("location"),
-                    parking_id=payload.get("parkingId"),
-                    is_active=payload.get("isActive", True),
+                    camera_id=str(camera_id),
+                    name=camera_data.get("name"),
+                    url=camera_data.get("url"),
+                    location=None,  # El backend no envía location
+                    parking_id=camera_data.get("parkingId"),
+                    is_active=is_active,
                 )
+
                 self.repo.save(cam)
                 logger.info(f"📸 Cámara {camera_id} actualizada/creada desde Kafka")
 
-            elif event_type in ("CameraDeleted", "CameraDeactivated"):
-                self.repo.delete(camera_id)
+            # DELETE / DEACTIVATE
+            elif event_type in ("DELETE", "DEACTIVATE"):
+                self.repo.delete(str(camera_id))
                 logger.info(f"🗑️ Cámara {camera_id} eliminada/desactivada desde Kafka")
 
             else:

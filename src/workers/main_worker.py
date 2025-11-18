@@ -1,5 +1,5 @@
 import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, module="yolov5")
+warnings.filterwarnings("ignore")
 
 import logging
 import threading
@@ -11,6 +11,7 @@ from src.infrastructure.Camera.camera_repository import CameraRepository
 from src.infrastructure.Messaging.consumers.camera_sync_consumer import CameraSyncConsumer
 
 from src.application.camera_thread_manager import CameraThreadManager
+from src.monitoring.metrics import start_metrics_server
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,36 +21,36 @@ logger = logging.getLogger(__name__)
 
 
 def main():
-    # Crear DB local si no existe
     Base.metadata.create_all(bind=engine)
     repo = CameraRepository()
 
-    # 1️⃣ Iniciar consumer de sincronización con backend
+    start_metrics_server(port=9100)
+
+    # Kafka consumer
     try:
-        camera_consumer = CameraSyncConsumer(
+        consumer = CameraSyncConsumer(
             topic=settings.kafka_camera_sync_topic,
             group_id=settings.kafka_camera_sync_group,
+            bootstrap_servers=settings.kafka_broker,
             auto_offset_reset=settings.kafka_auto_offset_reset,
             enable_auto_commit=settings.kafka_enable_auto_commit,
-            bootstrap_servers=settings.kafka_broker,
         )
-        threading.Thread(target=camera_consumer.start, daemon=True).start()
-        logger.info("🔄 CameraSyncConsumer iniciado")
+        threading.Thread(target=consumer.start, daemon=True).start()
+        logger.info("🔄 CameraSyncConsumer iniciado.")
     except Exception:
-        logger.exception("⚠️ No se pudo iniciar CameraSyncConsumer")
+        logger.exception("⚠️ No se pudo iniciar consumer Kafka")
 
-    # 2️⃣ Iniciar el gestor de threads de cámaras
+    # Thread Manager
     manager = CameraThreadManager(repo)
     threading.Thread(target=manager.start, daemon=True).start()
 
-    logger.info("🚀 CameraThreadManager ejecutándose")
+    logger.info("🚀 Microservicio ANPR iniciado.")
 
-    # 3️⃣ Mantener proceso vivo
     try:
         while True:
             threading.Event().wait(5)
     except KeyboardInterrupt:
-        logger.info("🧠 Deteniendo microservicio...")
+        logger.info("🧠 Deteniendo…" )
 
 
 if __name__ == "__main__":

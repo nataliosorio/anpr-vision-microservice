@@ -35,7 +35,7 @@ class KafkaPublisher(IEventPublisher):
             base_conf.update(producer_conf)
 
         self.producer = Producer(base_conf)
-        self.topic = settings.kafka_topic
+        self.topic = settings.kafka_topic_plate
         self.delivery_timeout = delivery_timeout
 
         # Métricas básicas

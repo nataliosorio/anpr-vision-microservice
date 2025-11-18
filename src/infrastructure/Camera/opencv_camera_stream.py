@@ -1,131 +1,121 @@
+# src/infrastructure/Camera/opencv_camera_stream.py
+
 import cv2
 import time
 import logging
-import threading
 from src.domain.Models.frame import Frame
 from src.domain.Interfaces.camera_stream import ICameraStream
 
 logger = logging.getLogger(__name__)
 
+
 class OpenCVCameraStream(ICameraStream):
     """
-    Implementación de ICameraStream usando OpenCV con lectura en hilo separado.
-    Source en Frame será camera_id si está disponible, si no la URL.
+    Implementación simplificada para PlateRecognitionServiceV2.
+    - Sin thread interno (el pipeline ya maneja captura)
+    - read_frame(timeout=...) real
+    - reconexión automática ligera
     """
 
-    def __init__(self, url: str, reconnect_attempts: int = 3, fps_limit: float = 0.0):
-        """
-        :param url: URL del stream (RTSP/HTTP/archivo).
-        :param reconnect_attempts: Número de intentos de reconexión antes de fallar.
-        :param fps_limit: Máx FPS (0 = ilimitado).
-        """
+    def __init__(self, url: str, reconnect_attempts: int = 3):
         self.url = url
-        self.camera_id = None            # se setea desde la factory
-        self.parking_id = None           # 👈 ahora declarado explícitamente
-        self.name = None                 # 👈 opcional: para logs y trazabilidad
-        self.location = None             # 👈 opcional: para logs y debugging
+        self.camera_id = None
+        self.parking_id = None
+        self.name = None
+        self.location = None
 
         self.cap = None
         self.reconnect_attempts = reconnect_attempts
-        self.fps_limit = fps_limit
-        self._last_frame_time = 0.0
 
-        # variables para thread
-        self._frame_lock = threading.Lock()
-        self._latest_frame = None
-        self._running = False
-        self._thread = None
-
+    # ==========================================================
+    # CONNECT
+    # ==========================================================
     def connect(self) -> None:
-        """Inicia la conexión al stream de video."""
         self.cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
 
-        # Si es RTSP, reducir el buffer a 1
-        if isinstance(self.url, str) and self.url.startswith("rtsp://") and self.cap is not None:
+        # RTSP → desactivar buffers
+        if isinstance(self.url, str) and self.url.startswith("rtsp://"):
             try:
                 self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            except Exception:
-                pass  # algunos builds no soportan esta propiedad
+            except:
+                pass
 
         if not self.cap or not self.cap.isOpened():
             raise ConnectionError(f"No se pudo abrir el stream: {self.url}")
 
-        logger.info(f"🎥 Conectado al stream {self.name or self.camera_id or self.url} "
-                    f"(parking_id={self.parking_id})")
+        logger.info(
+            f"🎥 Conectado a {self.name or self.camera_id or self.url} "
+            f"(parking={self.parking_id})"
+        )
 
-        # Lanzar thread de lectura
-        self._running = True
-        self._thread = threading.Thread(target=self._update_frames, daemon=True)
-        self._thread.start()
-
-    def _update_frames(self):
-        """Hilo que lee continuamente frames y mantiene solo el más reciente."""
-        while self._running:
-            if self.cap is None or not self.cap.isOpened():
-                if not self._try_reconnect():
-                    time.sleep(1)
-                continue
-
-            ret, frame = self.cap.read()
-            if not ret:
-                logger.warning(f"[{self.camera_id}] Error al leer frame, intentando reconectar...")
-                if not self._try_reconnect():
-                    time.sleep(1)
-                continue
-
-            # source preferencial: camera_id si existe, si no la URL
-            source = getattr(self, "camera_id", None) or self.url
-            with self._frame_lock:
-                self._latest_frame = Frame(data=frame, timestamp=time.time(), source=source)
-
-    def read_frame(self):
-        """Devuelve el último frame disponible respetando el fps_limit."""
-        if self.fps_limit > 0:
-            elapsed = time.time() - self._last_frame_time
-            min_interval = 1.0 / self.fps_limit
-            if elapsed < min_interval:
+    # ==========================================================
+    # READ FRAME CON TIMEOUT
+    # ==========================================================
+    def read_frame(self, timeout: float = 1.0):
+        """
+        Lee un frame con timeout real.
+        Si falla → reintenta reconectar.
+        """
+        if self.cap is None:
+            if not self._try_reconnect():
                 return None
 
-        with self._frame_lock:
-            frame = self._latest_frame
+        deadline = time.time() + timeout
 
-        if frame is None:
-            return None
+        while time.time() < deadline:
+            ret, frame = self.cap.read()
+            if ret:
+                source = getattr(self, "camera_id", None) or self.url
+                return Frame(
+                    data=frame,
+                    timestamp=time.time(),
+                    source=source
+                )
 
-        self._last_frame_time = time.time()
-        return frame
+            # intentar reconectar si no lee
+            if not self._try_reconnect():
+                break
 
+        return None
+
+    # ==========================================================
+    # RECONNECT
+    # ==========================================================
     def _try_reconnect(self) -> bool:
-        """Intenta reconectar al stream."""
         for attempt in range(1, self.reconnect_attempts + 1):
-            logger.info(f"[{self.camera_id}] Reintentando conexión ({attempt}/{self.reconnect_attempts})...")
+            logger.warning(
+                f"[{self.camera_id}] Reintentando conexión {attempt}/{self.reconnect_attempts}..."
+            )
+
             cap = cv2.VideoCapture(self.url, cv2.CAP_FFMPEG)
 
-            if isinstance(self.url, str) and self.url.startswith("rtsp://") and cap is not None:
+            if isinstance(self.url, str) and self.url.startswith("rtsp://"):
                 try:
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-                except Exception:
+                except:
                     pass
 
             if cap and cap.isOpened():
                 self.cap = cap
                 logger.info(f"[{self.camera_id}] Reconexión exitosa.")
                 return True
-            time.sleep(1)
-        logger.error(f"[{self.camera_id}] No se pudo reconectar al stream.")
+
+            time.sleep(0.2)  # rápido, no 1 segundo
+
+        logger.error(f"[{self.camera_id}] No se pudo reconectar.")
         return False
 
+    # ==========================================================
+    # DISCONNECT
+    # ==========================================================
     def disconnect(self) -> None:
-        """Detiene el hilo y libera la cámara."""
-        self._running = False
-        if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=2.0)
         if self.cap:
             try:
                 self.cap.release()
-            except Exception:
+            except:
                 pass
             self.cap = None
+
         logger.info(f"🔌 Stream cerrado ({self.camera_id}).")
 
     def __enter__(self):
