@@ -12,6 +12,7 @@ __pycache__/
 
 # Archivos de base de datos locales
 *.sqlite3
+*.db
 
 # Carpetas de caché de herramientas
 .pytest_cache/
