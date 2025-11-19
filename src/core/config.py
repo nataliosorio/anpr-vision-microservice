@@ -74,7 +74,7 @@ class Settings(BaseSettings):
     # =========================
     camera_url: str = Field(None, env="CAMERA_URL")
     camera_native: bool = Field(False, env="CAMERA_NATIVE")
-
+    use_fake_cam: bool = Field(False, env="USE_FAKE_CAM")
     # =========================
     #  YOLO Version
     # =========================

@@ -10,17 +10,17 @@ def create_camera_stream(camera: Optional[Camera] = None) -> ICameraStream:
     También adjunta la metadata de la cámara al stream resultante.
     """
 
-    # ==========================================================
-    # 🧪 1) Fake camera para pruebas y stress tests
-    # ==========================================================
-    if camera is not None and isinstance(camera.url, str) and camera.url.startswith("fake://"):
+# ==========================================================
+# 🧪 1) Fake camera para pruebas y stress tests
+# ==========================================================
+    if settings.use_fake_cam:
         from src.infrastructure.Camera.fake_camera_stream import FakeCameraStream
 
-        video_path = camera.url.replace("fake://", "")  # fake://video.mp4
+        video_path = settings.camera_url.replace("fake://", "")  # usa el video que tengas en settings
         stream = FakeCameraStream(
             video_path=video_path,
-            camera_id=camera.camera_id,
-            parking_id=camera.parking_id
+            camera_id=camera.camera_id if camera else "fake",
+            parking_id=camera.parking_id if camera else None
         )
 
     # ==========================================================
