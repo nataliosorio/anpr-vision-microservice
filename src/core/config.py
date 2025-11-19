@@ -26,9 +26,9 @@ class Settings(BaseSettings):
     # =========================
     #  App
     # =========================
-    deploy_env: str = Field("develop", env="DEPLOY_ENV")
+    deploy_env: str = Field("prod", env="DEPLOY_ENV")
     app_name: str = Field("anpr-microservice", env="APP_NAME")
-    app_env: str = Field("develop", env="APP_ENV")
+    app_env: str = Field("prod", env="APP_ENV")
     app_port: int = Field(8000, env="APP_PORT")
 
     # =========================
