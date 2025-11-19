@@ -12,7 +12,8 @@ services:
     networks:
       - anpr-net-prod
     restart: unless-stopped
-
+    expose:
+      - "8000"
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 20s
@@ -24,7 +25,11 @@ services:
     container_name: prometheus-prod
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    # En prod NO exponemos puertos para seguridad
+    ports:
+      - "9090:9090"  # prod local -> queremos verlo en localhost
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.listen-address=:9090'
     networks:
       - anpr-net-prod
     restart: unless-stopped
@@ -36,7 +41,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASS}
     volumes:
       - grafana_prod:/var/lib/grafana
-    #  Tampoco exponemos puertos aquí
+    ports:
+      - "3000:3000"  # prod local -> queremos verlo en localhost
     networks:
       - anpr-net-prod
     restart: unless-stopped
