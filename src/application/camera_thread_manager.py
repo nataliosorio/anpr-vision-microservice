@@ -45,29 +45,36 @@ class CameraThreadManager:
     def reconcile(self):
         db_cameras = {c.camera_id: c for c in self.repo.get_all()}
 
-        # 1) nuevas cámaras
+        # 1) NUEVAS O ACTUALIZADAS
         for cam_id, cam in db_cameras.items():
 
-            # no existía → crear
+            # --- NUEVA CÁMARA ---
             if cam_id not in self.threads:
                 logger.info(f"🆕 Cámara nueva {cam_id}, levantando thread…")
                 self._start(cam)
                 self.snapshot[cam_id] = deepcopy(cam)
                 continue
 
-            # existía → verificar cambios
-            old = self.snapshot[cam_id]
+            # --- SNAPSHOT INCONSISTENTE ---
+            old = self.snapshot.get(cam_id)
+            if old is None:
+                logger.warning(f"⚠️ Snapshot inconsistente para cámara {cam_id}, reparando…")
+                self.snapshot[cam_id] = deepcopy(cam)
+                continue
+
+            # --- URL CAMBIÓ ---
             if cam.url != old.url:
                 logger.info(f"🔄 Cámara {cam_id} modificada (URL cambió). Reiniciando…")
                 self._restart(cam)
                 self.snapshot[cam_id] = deepcopy(cam)
 
-            # thread muerto → revivir
+            # --- THREAD MUERTO ---
             if not self.threads[cam_id].is_alive():
                 logger.error(f"💀 Thread de {cam_id} murió. Reiniciando…")
                 self._restart(cam)
+                self.snapshot[cam_id] = deepcopy(cam)
 
-        # 2) cámaras eliminadas
+        # 2) CÁMARAS ELIMINADAS
         for cam_id in list(self.threads.keys()):
             if cam_id not in db_cameras:
                 logger.info(f"🗑️ Cámara eliminada {cam_id}, deteniendo thread…")
