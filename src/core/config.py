@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 # 1) Cargar .env raíz
 # ==========================================================
 load_dotenv(".env")
-DEPLOY_ENV = os.getenv("DEPLOY_ENV", "develop").lower()
+DEPLOY_ENV = os.getenv("DEPLOY_ENV", "prod").lower()
 
 # ==========================================================
 # 2) Cargar .env del entorno
