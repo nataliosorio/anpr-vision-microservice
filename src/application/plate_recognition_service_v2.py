@@ -94,7 +94,7 @@ class PlateRecognitionServiceV2:
         try:
             self.capture_queue.put_nowait(None)
             self.publish_queue.put_nowait(None)
-        except:
+        except Exception:
             pass
 
         if self.capture_thread:
@@ -108,7 +108,7 @@ class PlateRecognitionServiceV2:
 
         try:
             self.camera_stream.disconnect()
-        except:
+        except Exception:
             logger.exception("Error desconectando cámara")
 
     # ---------------------------------------------------------
@@ -136,6 +136,8 @@ class PlateRecognitionServiceV2:
             fps_counter += 1
             if time.time() - fps_timer >= 1:
                 camera_fps.labels(camera_id=self.camera_id).set(fps_counter)
+                # si quieres ver los FPS en logs:
+                logger.debug(f"[V2][{self.camera_id}] FPS actual: {fps_counter}")
                 fps_counter = 0
                 fps_timer = time.time()
 
@@ -145,9 +147,10 @@ class PlateRecognitionServiceV2:
                 try:
                     _ = self.capture_queue.get_nowait()
                     self.capture_queue.put_nowait(frame)
-                except:
+                except Exception:
                     pass
 
+            # cada frame se procesa en un worker
             self.executor.submit(self._process_frame, frame)
 
     # ---------------------------------------------------------
@@ -156,34 +159,41 @@ class PlateRecognitionServiceV2:
     def _process_frame(self, frame):
         t0 = time.perf_counter()
 
-        # detector
-        t1 = time.perf_counter()
         try:
+            # detector
+            t1 = time.perf_counter()
             bboxes = self.detector.detect(frame) or []
-        except Exception:
-            logger.exception("Detector falló")
-            return
-        detector_latency.labels(camera_id=self.camera_id).set(time.perf_counter() - t1)
+            detector_latency.labels(camera_id=self.camera_id).set(time.perf_counter() - t1)
 
-        # ocr
-        raw_ocr = []
-        if bboxes:
+            if not bboxes:
+                logger.debug(f"[V2][{self.camera_id}] Sin bboxes en este frame.")
+                return
+
+            # ocr
             t2 = time.perf_counter()
             raw_ocr = self._run_ocr(frame, bboxes)
             ocr_latency.labels(camera_id=self.camera_id).set(time.perf_counter() - t2)
 
-        plates = self._normalize_and_track(raw_ocr)
-        if not plates:
-            return
+            if not raw_ocr:
+                logger.debug(f"[V2][{self.camera_id}] OCR vacío (sin texto útil).")
+                return
 
-        # publish
-        event = self._make_event(plates, frame)
-        try:
-            self.publish_queue.put_nowait(event)
-        except queue.Full:
-            pass
+            plates = self._normalize_and_track(raw_ocr, frame)
+            if not plates:
+                logger.debug(f"[V2][{self.camera_id}] Después de normalizar/tracking no hay placas únicas.")
+                return
 
-        pipeline_latency.labels(camera_id=self.camera_id).set(time.perf_counter() - t0)
+            # publish
+            event = self._make_event(plates, frame)
+            try:
+                self.publish_queue.put_nowait(event)
+            except queue.Full:
+                logger.warning(f"[V2][{self.camera_id}] publish_queue llena, descartando evento.")
+
+            pipeline_latency.labels(camera_id=self.camera_id).set(time.perf_counter() - t0)
+
+        except Exception:
+            logger.exception(f"[V2][{self.camera_id}] Error procesando frame")
 
     # ---------------------------------------------------------
     # OCR
@@ -193,12 +203,18 @@ class PlateRecognitionServiceV2:
             return [self.ocr_reader.read_text(frame, b) for b in bboxes]
 
         futures = [self.ocr_executor.submit(self.ocr_reader.read_text, frame, b) for b in bboxes]
-        return [f.result() for f in futures]
+        results = []
+        for f in futures:
+            try:
+                results.append(f.result())
+            except Exception:
+                logger.exception(f"[V2][{self.camera_id}] OCR falló en una bbox")
+        return results
 
     # ---------------------------------------------------------
     # NORMALIZATION + TRACKING
     # ---------------------------------------------------------
-    def _normalize_and_track(self, raw):
+    def _normalize_and_track(self, raw, frame=None):
         processed = []
 
         for r in raw:
@@ -220,20 +236,63 @@ class PlateRecognitionServiceV2:
             ))
 
         if not processed:
+            logger.debug(f"[V2][{self.camera_id}] processed=0 después de normalizer/filtrado.")
             return []
 
-        tracked = self.tracker.update(processed)
+        # calcular image_size como en V1
+        image_size = None
+        if frame is not None:
+            try:
+                img = getattr(frame, "data", None)
+                if img is not None:
+                    h, w = img.shape[:2]
+                    image_size = (h, w)
+            except Exception:
+                pass
+
+        # tracker.update con compatibilidad V1/V2
+        try:
+            if image_size:
+                tracked = self.tracker.update(processed, image_size=image_size)
+            else:
+                tracked = self.tracker.update(processed)
+        except TypeError:
+            # fallback para trackers que no aceptan image_size
+            tracked = self.tracker.update(processed)
+        except Exception:
+            logger.exception(f"[V2][{self.camera_id}] Tracker.update falló")
+            return []
+
+        tracked = tracked or []
 
         unique = []
         for p in tracked:
             tid = getattr(p, "track_id", None)
             txt = getattr(p, "text", None)
 
-            if not self.deduplicator.is_duplicate(tid, txt, self.camera_id):
-                unique.append(p)
+            if not txt:
+                continue
+
+            try:
+                if not self.deduplicator.is_duplicate(tid, txt, self.camera_id):
+                    unique.append(p)
+            except TypeError:
+                # por si tu implementación antigua del deduplicator tenía otra firma
+                try:
+                    if not self.deduplicator.is_duplicate(tid, txt):
+                        unique.append(p)
+                except Exception:
+                    logger.exception(f"[V2][{self.camera_id}] Deduplicator falló para track={tid} text={txt}")
+            except Exception:
+                logger.exception(f"[V2][{self.camera_id}] Deduplicator falló para track={tid} text={txt}")
 
         if unique:
             plates_detected_total.labels(camera_id=self.camera_id).inc()
+
+        logger.debug(
+            f"[V2][{self.camera_id}] raw={len(raw)} processed={len(processed)} "
+            f"tracked={len(tracked)} unique={len(unique)}"
+        )
 
         return unique
 
@@ -252,15 +311,14 @@ class PlateRecognitionServiceV2:
 
             try:
                 self.publisher.publish(event)
-            except:
-                logger.exception("Error publicando evento")
+            except Exception:
+                logger.exception(f"[V2][{self.camera_id}] Error publicando evento")
 
     # ---------------------------------------------------------
     # EVENT FACTORY
     # ---------------------------------------------------------
     def _make_event(self, plates, frame):
         captured_at = getattr(frame, "timestamp", time.time())
-
         ev_id = f"{self.camera_id}:{plates[0].text}:{int(captured_at)}"
 
         return DetectionResult(
