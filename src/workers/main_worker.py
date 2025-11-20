@@ -29,7 +29,7 @@ def main():
     # Kafka consumer
     try:
         consumer = CameraSyncConsumer(
-            topic=settings.kafka_camera_sync_topic,
+            topic=settings.kafka_topic_cameras,
             group_id=settings.kafka_camera_sync_group,
             bootstrap_servers=settings.kafka_broker,
             auto_offset_reset=settings.kafka_auto_offset_reset,
