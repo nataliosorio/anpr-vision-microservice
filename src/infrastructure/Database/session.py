@@ -1,5 +1,5 @@
 # src/infrastructure/Database/session.py
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 from src.core.config import settings
 import logging
@@ -12,10 +12,13 @@ connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite")
 
 try:
     engine = create_engine(DATABASE_URL, connect_args=connect_args)
-    # Probar una conexión mínima
+
+    # Probar una conexión mínima (SQLAlchemy 2.0 → usar text("SELECT 1"))
     with engine.connect() as conn:
-        conn.execute("SELECT 1")
+        conn.execute(text("SELECT 1"))
+
     logger.info(f"✅ Conectado correctamente a la BD: {DATABASE_URL}")
+
 except Exception as e:
     logger.warning(f"⚠️ No se pudo conectar a {DATABASE_URL}. Usando fallback SQLite. Error: {e}")
     DATABASE_URL = "sqlite:///./anpr_micro.db"
