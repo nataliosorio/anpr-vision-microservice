@@ -1,4 +1,6 @@
 import logging
+import time
+
 from src.infrastructure.Camera.camera_factory import create_camera_stream
 from src.application.plate_recognition_service_v2 import PlateRecognitionServiceV2
 
@@ -13,10 +15,15 @@ from src.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-_running_services = {}   # camera_id -> service_instance
+# camera_id -> instancia de PlateRecognitionServiceV2
+_running_services: dict[str, PlateRecognitionServiceV2] = {}
+
 
 def run_camera_service(cam):
-    """Levanta un servicio V2 para una cámara."""
+    """
+    Levanta un servicio V2 para una cámara y mantiene
+    el thread VIVO hasta que alguien llame stop_camera_service(cam_id).
+    """
     global _running_services
 
     logger.info(f"🎥 Starting service for camera {cam.camera_id} ({cam.url})")
@@ -48,21 +55,37 @@ def run_camera_service(cam):
     _running_services[cam.camera_id] = service
 
     try:
+        # Arranca los threads internos (capture/publish)
         service.start()
+
+        # 🔴 IMPORTANTE: mantener este hilo bloqueado mientras el servicio siga activo
+        while not service.stop_event.is_set():
+            time.sleep(1)
+
     except Exception:
         logger.exception(f"❌ Error en cámara {cam.camera_id}")
-        service.stop()
     finally:
+        # Asegurar stop ordenado
+        try:
+            service.stop()
+        except Exception:
+            logger.exception(f"Error deteniendo servicio de cámara {cam.camera_id}")
+
+        # Cerrar producer Kafka
         kafka_raw.close()
 
+        # Limpiar registro
+        _running_services.pop(cam.camera_id, None)
 
-def stop_camera_service(cam_id):
-    """Detiene un servicio de cámara existente."""
-    global _running_services
 
-    if cam_id in _running_services:
+def stop_camera_service(cam_id: str):
+    """
+    Detiene un servicio de cámara existente.
+    No borra aquí del diccionario: lo hace run_camera_service() en el finally.
+    """
+    service = _running_services.get(cam_id)
+    if service:
         try:
-            _running_services[cam_id].stop()
-        except:
-            pass
-        del _running_services[cam_id]
+            service.stop()
+        except Exception:
+            logger.exception(f"Error deteniendo servicio de cámara {cam_id}")
