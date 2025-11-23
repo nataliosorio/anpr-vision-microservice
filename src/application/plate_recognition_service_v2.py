@@ -60,17 +60,19 @@ class PlateRecognitionServiceV2:
         self.stop_event = threading.Event()
 
         # queues
+        # 👇 cola acotada de captura (modo last-wins)
         self.capture_queue = queue.Queue(maxsize=3)
         self.publish_queue = queue.Queue(maxsize=50)
 
         # worker pools
         self.processing_workers = processing_workers or max(1, (os.cpu_count() or 2) - 1)
-        self.executor = ThreadPoolExecutor(max_workers=self.processing_workers)
+        # Solo usamos executor para OCR (paralelizar bboxes dentro de un frame si quieres)
         self.ocr_executor = ThreadPoolExecutor(max_workers=1) if ocr_worker else None
 
         # threads
-        self.capture_thread = None
-        self.publish_thread = None
+        self.capture_thread: threading.Thread | None = None
+        self.publish_thread: threading.Thread | None = None
+        self.processing_threads: list[threading.Thread] = []
 
     # ---------------------------------------------------------
     # START / STOP
@@ -81,18 +83,41 @@ class PlateRecognitionServiceV2:
         self.stop_event.clear()
         self.camera_stream.connect()
 
-        self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
+        # hilo de captura
+        self.capture_thread = threading.Thread(
+            target=self._capture_loop,
+            name=f"capture-{self.camera_id}",
+            daemon=True,
+        )
         self.capture_thread.start()
 
-        self.publish_thread = threading.Thread(target=self._publish_loop, daemon=True)
+        # hilo de publicación
+        self.publish_thread = threading.Thread(
+            target=self._publish_loop,
+            name=f"publish-{self.camera_id}",
+            daemon=True,
+        )
         self.publish_thread.start()
+
+        # workers de procesamiento que consumen de capture_queue
+        for i in range(self.processing_workers):
+            t = threading.Thread(
+                target=self._processing_worker_loop,
+                name=f"proc-{self.camera_id}-{i}",
+                daemon=True,
+            )
+            t.start()
+            self.processing_threads.append(t)
 
     def stop(self):
         logger.info(f"[V2] Deteniendo cámara {self.camera_id}")
 
         self.stop_event.set()
         try:
-            self.capture_queue.put_nowait(None)
+            # Sentinelas para despertar a los workers de procesamiento
+            for _ in range(self.processing_workers):
+                self.capture_queue.put_nowait(None)
+            # Sentinela para publish_loop
             self.publish_queue.put_nowait(None)
         except Exception:
             pass
@@ -102,7 +127,9 @@ class PlateRecognitionServiceV2:
         if self.publish_thread:
             self.publish_thread.join(timeout=2)
 
-        self.executor.shutdown(wait=False, cancel_futures=True)
+        for t in self.processing_threads:
+            t.join(timeout=2)
+
         if self.ocr_executor:
             self.ocr_executor.shutdown(wait=False, cancel_futures=True)
 
@@ -136,11 +163,11 @@ class PlateRecognitionServiceV2:
             fps_counter += 1
             if time.time() - fps_timer >= 1:
                 camera_fps.labels(camera_id=self.camera_id).set(fps_counter)
-                # si quieres ver los FPS en logs:
                 logger.debug(f"[V2][{self.camera_id}] FPS actual: {fps_counter}")
                 fps_counter = 0
                 fps_timer = time.time()
 
+            # Encolar frame con política "last wins"
             try:
                 self.capture_queue.put_nowait(frame)
             except queue.Full:
@@ -148,13 +175,32 @@ class PlateRecognitionServiceV2:
                     _ = self.capture_queue.get_nowait()
                     self.capture_queue.put_nowait(frame)
                 except Exception:
+                    # si no se puede, simplemente se descarta este frame
                     pass
 
-            # cada frame se procesa en un worker
-            self.executor.submit(self._process_frame, frame)
+    # ---------------------------------------------------------
+    # PROCESSING WORKERS
+    # ---------------------------------------------------------
+    def _processing_worker_loop(self):
+        while not self.stop_event.is_set():
+            try:
+                frame = self.capture_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            if frame is None:
+                self.capture_queue.task_done()
+                break
+
+            try:
+                self._process_frame(frame)
+            finally:
+                self.capture_queue.task_done()
+
+        logger.info(f"[V2][{self.camera_id}] Worker de procesamiento terminado")
 
     # ---------------------------------------------------------
-    # PROCESSING
+    # PROCESSING (por frame)
     # ---------------------------------------------------------
     def _process_frame(self, frame):
         t0 = time.perf_counter()
@@ -239,7 +285,7 @@ class PlateRecognitionServiceV2:
             logger.debug(f"[V2][{self.camera_id}] processed=0 después de normalizer/filtrado.")
             return []
 
-        # calcular image_size como en V1
+        # calcular image_size
         image_size = None
         if frame is not None:
             try:
@@ -257,7 +303,6 @@ class PlateRecognitionServiceV2:
             else:
                 tracked = self.tracker.update(processed)
         except TypeError:
-            # fallback para trackers que no aceptan image_size
             tracked = self.tracker.update(processed)
         except Exception:
             logger.exception(f"[V2][{self.camera_id}] Tracker.update falló")
@@ -277,7 +322,6 @@ class PlateRecognitionServiceV2:
                 if not self.deduplicator.is_duplicate(tid, txt, self.camera_id):
                     unique.append(p)
             except TypeError:
-                # por si tu implementación antigua del deduplicator tenía otra firma
                 try:
                     if not self.deduplicator.is_duplicate(tid, txt):
                         unique.append(p)
@@ -307,12 +351,17 @@ class PlateRecognitionServiceV2:
                 continue
 
             if event is None:
+                self.publish_queue.task_done()
                 break
 
             try:
                 self.publisher.publish(event)
             except Exception:
                 logger.exception(f"[V2][{self.camera_id}] Error publicando evento")
+            finally:
+                self.publish_queue.task_done()
+
+        logger.info(f"[V2][{self.camera_id}] Publish loop terminado")
 
     # ---------------------------------------------------------
     # EVENT FACTORY

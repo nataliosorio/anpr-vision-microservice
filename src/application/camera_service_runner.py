@@ -34,8 +34,8 @@ def run_camera_service(cam):
     ocr = EasyOCR_OCRReader()
     tracker = ByteTrackerAdapter()
 
-    kafka_raw = KafkaPublisher(delivery_timeout=5)
-    publisher = RetryPublisher(kafka_raw, attempts=1, base_delay=1)
+    kafka_raw = KafkaPublisher(delivery_timeout=10)
+    publisher = RetryPublisher(kafka_raw, attempts=0, base_delay=1)
 
     normalizer = PlateNormalizer(min_len=settings.plate_min_length)
     dedup = DeduplicatorService(normalizer=normalizer, ttl=settings.dedup_ttl)
