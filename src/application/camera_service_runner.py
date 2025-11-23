@@ -35,10 +35,19 @@ def run_camera_service(cam):
     tracker = ByteTrackerAdapter()
 
     kafka_raw = KafkaPublisher(delivery_timeout=10)
+    # attempts=0 -> sin reintentos adicionales (ya hay lógica de timeout en KafkaPublisher)
     publisher = RetryPublisher(kafka_raw, attempts=0, base_delay=1)
 
-    normalizer = PlateNormalizer(min_len=settings.plate_min_length)
-    dedup = DeduplicatorService(normalizer=normalizer, ttl=settings.dedup_ttl)
+    normalizer = PlateNormalizer(
+        min_len=settings.plate_min_length,
+        max_len=settings.plate_max_length,
+    )
+
+    dedup = DeduplicatorService(
+        normalizer=normalizer,
+        ttl=settings.dedup_ttl,
+        similarity_threshold=settings.similarity_threshold,
+    )
 
     service = PlateRecognitionServiceV2(
         camera_stream=stream,
@@ -48,17 +57,17 @@ def run_camera_service(cam):
         tracker=tracker,
         deduplicator=dedup,
         normalizer=normalizer,
-        max_fps=10,
-        processing_workers=None,
+        max_fps=settings.max_fps,                 # viene directo de .env
+        processing_workers=settings.processing_workers,  # idem
     )
 
     _running_services[cam.camera_id] = service
 
     try:
-        # Arranca los threads internos (capture/publish)
+        # Arranca los threads internos (capture/publish/processing)
         service.start()
 
-        # 🔴 IMPORTANTE: mantener este hilo bloqueado mientras el servicio siga activo
+        # Mantener este hilo bloqueado mientras el servicio siga activo
         while not service.stop_event.is_set():
             time.sleep(1)
 

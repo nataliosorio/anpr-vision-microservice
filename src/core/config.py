@@ -3,7 +3,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field
 from dotenv import load_dotenv
 
-
 # ==========================================================
 # 1) Cargar .env raíz
 # ==========================================================
@@ -20,13 +19,13 @@ load_dotenv(ENV_PATH, override=True)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=ENV_PATH,
-        extra="allow"
+        extra="allow",
     )
 
     # =========================
     #  App
     # =========================
-    deploy_env: str = Field("prod", env="DEPLOY_ENV")
+    deploy_env: str = Field(DEPLOY_ENV, env="DEPLOY_ENV")
     app_name: str = Field("anpr-microservice", env="APP_NAME")
     app_env: str = Field("prod", env="APP_ENV")
     app_port: int = Field(8000, env="APP_PORT")
@@ -53,32 +52,39 @@ class Settings(BaseSettings):
     # =========================
     debug_show: bool = Field(False, env="DEBUG_SHOW")
     loop_delay: float = Field(0.0, env="LOOP_DELAY")
+    max_fps: int = Field(8, env="MAX_FPS")
+    processing_workers: int = Field(1, env="PROCESSING_WORKERS")
 
     # =========================
     #  Dedup
     # =========================
-    dedup_ttl: float = Field(9.0, env="DEDUP_TTL")
+    dedup_ttl: float = Field(30.0, env="DEDUP_TTL")
     similarity_threshold: float = Field(0.9, env="SIMILARITY_THRESHOLD")
-    plate_min_length: int = Field(5, env="PLATE_MIN_LENGTH")
+    plate_min_length: int = Field(4, env="PLATE_MIN_LENGTH")
     plate_max_length: int = Field(8, env="PLATE_MAX_LENGTH")
+
     # =========================
     #  OCR
     # =========================
     ocr_lang: str = Field("en", env="OCR_LANG")
     ocr_interval: int = Field(5, env="OCR_INTERVAL")
     ocr_min_length: int = Field(5, env="OCR_MIN_LENGTH")
-    ocr_min_confidence: float = Field(0.85, env="OCR_MIN_CONFIDENCE")
+    ocr_min_confidence: float = Field(0.9, env="OCR_MIN_CONFIDENCE")
 
     # =========================
     #  Camera
     # =========================
-    camera_url: str = Field(None, env="CAMERA_URL")
+    camera_url: str | None = Field(None, env="CAMERA_URL")
     camera_native: bool = Field(False, env="CAMERA_NATIVE")
     use_fake_cam: bool = Field(False, env="USE_FAKE_CAM")
+
     # =========================
-    #  YOLO Version
+    #  YOLO genérico
     # =========================
     yolo_version: str = Field("v5", env="YOLO_VERSION")
+    model_path: str = Field("./models/best.pt", env="MODEL_PATH")
+    conf_threshold: float = Field(0.7, env="CONF_THRESHOLD")
+    iou_threshold: float = Field(0.5, env="IOU_THRESHOLD")
 
     # =========================
     #  YOLOv5
