@@ -10,7 +10,7 @@ class RetryPublisher(IEventPublisher):
     Wrapper que reintenta publish hasta N veces con backoff exponencial.
     Solo reintenta si el error parece transitorio (red, timeout, broker unavailable).
     """
-    def __init__(self, inner: IEventPublisher, attempts: int = 0, base_delay: float = 0.5):
+    def __init__(self, inner: IEventPublisher, attempts: int = 1, base_delay: float = 0.5):
         self.inner = inner
         self.attempts = max(1, attempts)
         self.base_delay = base_delay

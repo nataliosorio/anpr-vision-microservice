@@ -23,7 +23,7 @@ class KafkaPublisher(IEventPublisher):
             "client.id": settings.app_name,
             "enable.idempotence": True,   # evita duplicados en el broker
             "acks": "all",
-            "message.send.max.retries": 0,
+            "message.send.max.retries": 1,
             "socket.timeout.ms": 30000,
             "request.timeout.ms": 30000,
             "linger.ms": 5,
