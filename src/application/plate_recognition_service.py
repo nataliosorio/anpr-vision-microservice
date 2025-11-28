@@ -250,7 +250,8 @@ class PlateRecognitionService:
                     processed_at=time.time(),
                     source=source,
                     captured_at=captured_at,
-                    camera_id=self.camera_id
+                    camera_id=self.camera_id,
+                    parking_id=getattr(self.camera_stream, "parking_id", None)
                 )
                 # enqueue for publishing (no bloqueante largo)
                 try:

@@ -1,99 +1,56 @@
+name: anpr-micro-prod
 version: "3.9"
 
 services:
-  # 🧠 Worker principal (ANPR Vision Microservice)
-  anpr-worker-prod:
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    container_name: anpr-worker-prod
+
+  anpr-micro:
+    image: anpr-microservice-prod:latest
+    container_name: anpr-micro-prod
     env_file:
       - .env
-    working_dir: /app
-    # ✅ No montamos código ni modelos en producción (usa los de la imagen)
     command: python -m src.workers.main_worker
-    depends_on:
-      - kafka-prod
-    networks:
-      - anpr-net-prod
-    tty: true
-    restart: unless-stopped
-
-  # ⚙️ Kafka Broker (modo Kraft - sin Zookeeper)
-  kafka-prod:
-    image: bitnamilegacy/kafka:4.0.0
-    container_name: kafka-prod
-    ports:
-      - "${KAFKA_PORT_INTERNAL}:${KAFKA_PORT_INTERNAL}"
-      - "${KAFKA_PORT_EXTERNAL}:${KAFKA_PORT_EXTERNAL}"
-    environment:
-      KAFKA_CFG_NODE_ID: 1
-      KAFKA_CFG_PROCESS_ROLES: broker,controller
-      KAFKA_CFG_LISTENERS: PLAINTEXT://:${KAFKA_PORT_INTERNAL},CONTROLLER://:9093,PLAINTEXT_HOST://:${KAFKA_PORT_EXTERNAL}
-      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
-      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: 1@kafka-prod:9093
-      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_CFG_ADVERTISED_LISTENERS: PLAINTEXT://kafka-prod:${KAFKA_PORT_INTERNAL},PLAINTEXT_HOST://localhost:${KAFKA_PORT_EXTERNAL}
-      ALLOW_PLAINTEXT_LISTENER: "yes"
-    volumes:
-      - kafka_data_prod:/bitnami/kafka
     networks:
       - anpr-net-prod
     restart: unless-stopped
+    expose:
+      - "8000"
     healthcheck:
-      test: ["CMD", "bash", "-c", "nc -z localhost ${KAFKA_PORT_INTERNAL} || nc -z localhost ${KAFKA_PORT_EXTERNAL}"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 20s
+      timeout: 10s
+      retries: 3
 
-  # 🧩 Inicializador de tópicos Kafka
-  kafka-init-prod:
-    image: bitnamilegacy/kafka:4.0.0
-    container_name: kafka-init-prod
-    depends_on:
-      - kafka-prod
-    env_file:
-      - .env
-    entrypoint: >
-      bash -c "
-        echo 'Esperando Kafka PROD...';
-        for i in $(seq 1 60); do
-          /opt/bitnami/kafka/bin/kafka-topics.sh --bootstrap-server ${KAFKA_BROKER} --list >/dev/null 2>&1 && { echo 'Kafka listo'; break; }
-          sleep 1;
-        done;
-        echo 'Creando tópico ${KAFKA_TOPIC}...';
-        /opt/bitnami/kafka/bin/kafka-topics.sh --create --bootstrap-server ${KAFKA_BROKER} --replication-factor 1 --partitions 3 --topic ${KAFKA_TOPIC} --if-not-exists;
-        echo '✅ kafka-init-prod completado';
-      "
-    networks:
-      - anpr-net-prod
-    restart: "no"
-
-  # 🧭 Kafka UI (interfaz web)
-  kafka-ui-prod:
-    image: provectuslabs/kafka-ui:latest
-    container_name: kafka-ui-prod
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus-prod
+    volumes:
+      - ./prometheus:/etc/prometheus
     ports:
-      - "8380:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: prod
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka-prod:${KAFKA_PORT_INTERNAL}
-    depends_on:
-      - kafka-prod
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--web.listen-address=:9090'
     networks:
       - anpr-net-prod
     restart: unless-stopped
 
-# ===============================
-# Volúmenes persistentes
-# ===============================
-volumes:
-  kafka_data_prod:
 
-# ===============================
-# Red interna del entorno
-# ===============================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana-prod
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASS}
+    volumes:
+      - grafana_prod:/var/lib/grafana
+    ports:
+      - "3000:3000"  # prod local -> queremos verlo en localhost
+    networks:
+      - anpr-net-prod
+    restart: unless-stopped
+
 networks:
   anpr-net-prod:
-    driver: bridge
+    external: true
 
+volumes:
+  grafana_prod:
