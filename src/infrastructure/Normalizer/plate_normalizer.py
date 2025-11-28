@@ -1,7 +1,9 @@
+# src/infrastructure/Normalizer/plate_normalizer.py
 import re
 from typing import Optional
 from src.domain.Interfaces.text_normalizer import ITextNormalizer
 from src.core.config import settings
+
 
 class PlateNormalizer(ITextNormalizer):
     """
@@ -10,6 +12,7 @@ class PlateNormalizer(ITextNormalizer):
     - Quitar separadores habituales
     - Aceptar solo A-Z0-9
     - Rechazar si fuera de rango [min_len, max_len]
+    - Rechazar si no tiene mezcla razonable de letras y dígitos
     """
     _ALNUM = re.compile(r"[^A-Z0-9]")
 
@@ -29,9 +32,15 @@ class PlateNormalizer(ITextNormalizer):
         t = self._ALNUM.sub("", t)
 
         # validar longitudes
-        if len(t) < self.min_len:
+        if len(t) < self.min_len or len(t) > self.max_len:
             return ""
-        if len(t) > self.max_len:
+
+        # mezcla letras / dígitos mínima
+        letters = sum(c.isalpha() for c in t)
+        digits = sum(c.isdigit() for c in t)
+        if letters < 2 or digits < 2:
+            # cosas tipo "AAAAAA", "111111", "ABCD12" (según min_len) pasan,
+            # pero ruido puro no.
             return ""
 
         return t

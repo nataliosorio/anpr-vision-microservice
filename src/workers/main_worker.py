@@ -1,62 +1,57 @@
-# main.py (worker) - minimal
 import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, module="yolov5")
+warnings.filterwarnings("ignore")
 
 import logging
-from src.core.config import settings
-from src.domain.Models.camera import Camera
-from src.infrastructure.Camera.camera_factory import create_camera_stream
-from src.infrastructure.Detector.factory import create_plate_detector
-from src.infrastructure.OCR.EasyOCR_OCRReader import EasyOCR_OCRReader
-from src.infrastructure.Tracking.byte_tracker import ByteTrackerAdapter
-from src.infrastructure.Messaging.retry_publisher import RetryPublisher
-from src.infrastructure.Messaging.kafka_publisher import KafkaPublisher
-from src.domain.Services.deduplicator_service import DeduplicatorService
-from src.infrastructure.Normalizer.plate_normalizer import PlateNormalizer
-from src.application.plate_recognition_service import PlateRecognitionService
+import threading
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+from src.core.config import settings
+from src.infrastructure.Database.base import Base
+from src.infrastructure.Database.session import engine
+from src.infrastructure.Camera.camera_repository import CameraRepository
+from src.infrastructure.Messaging.consumers.camera_sync_consumer import CameraSyncConsumer
+
+from src.application.camera_thread_manager import CameraThreadManager
+from src.monitoring.metrics import start_metrics_server
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+)
 logger = logging.getLogger(__name__)
 
+
 def main():
-    cam = Camera(camera_id="1", url=settings.camera_url, name="ENTRADA")
-    camera_stream = create_camera_stream(cam)
+    Base.metadata.create_all(bind=engine)
+    repo = CameraRepository()
 
-    detector = create_plate_detector()
-    ocr = EasyOCR_OCRReader()
-    tracker = ByteTrackerAdapter()
+    start_metrics_server(port=9100)
 
-    # Publisher: Kafka + Retry
-    kafka_raw = KafkaPublisher(delivery_timeout=5.0)   # usa settings.kafka_broker y settings.kafka_topic
-    publisher = RetryPublisher(kafka_raw, attempts=3, base_delay=1.0)
+    # Kafka consumer
+    try:
+        consumer = CameraSyncConsumer(
+            topic=settings.kafka_topic_cameras,
+            group_id=settings.kafka_camera_sync_group,
+            bootstrap_servers=settings.kafka_broker,
+            auto_offset_reset=settings.kafka_auto_offset_reset,
+            enable_auto_commit=settings.kafka_enable_auto_commit,
+        )
+        threading.Thread(target=consumer.start, daemon=True).start()
+        logger.info("🔄 CameraSyncConsumer iniciado.")
+    except Exception:
+        logger.exception("⚠️ No se pudo iniciar consumer Kafka")
 
-    normalizer = PlateNormalizer(min_len=settings.plate_min_length)
-    deduplicator = DeduplicatorService(normalizer=normalizer, ttl=settings.dedup_ttl)
+    # Thread Manager
+    manager = CameraThreadManager(repo)
+    threading.Thread(target=manager.start, daemon=True).start()
 
-    service = PlateRecognitionService(
-        camera_stream=camera_stream,
-        detector=detector,
-        ocr_reader=ocr,
-        publisher=publisher,
-        tracker=tracker,
-        deduplicator=deduplicator,
-        normalizer=normalizer,
-        debug_show=settings.debug_show,
-        loop_delay=settings.loop_delay,
-    )
+    logger.info("🚀 Microservicio ANPR iniciado.")
 
     try:
-        service.start()
+        while True:
+            threading.Event().wait(5)
     except KeyboardInterrupt:
-        logger.info("Deteniendo por KeyboardInterrupt")
-        service.stop()
-    except Exception:
-        logger.exception("Error en worker")
-    finally:
-        try:
-            kafka_raw.close()
-        except Exception:
-            logger.exception("Error cerrando Kafka producer")
+        logger.info("🧠 Deteniendo…" )
+
 
 if __name__ == "__main__":
     main()
